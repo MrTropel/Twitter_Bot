@@ -12,7 +12,7 @@ import time
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
-ACCESS_SECRET = os.getenv("ACCESS_TOKEN_SECRET")
+ACCESS_TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET")
 BEARER_TOKEN = os.getenv("BEARER_TOKEN")
 
 # Autenticación de Twitter
@@ -21,7 +21,7 @@ client = tweepy.Client(
     consumer_key=API_KEY,
     consumer_secret=API_SECRET,
     access_token=ACCESS_TOKEN,
-    access_token_secret=ACCESS_SECRET
+    access_token_secret=ACCESS_TOKEN_SECRET
 )
 
 # ========================
@@ -98,3 +98,4 @@ def root():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
     uvicorn.run("bot:app", host="0.0.0.0", port=port)
+
