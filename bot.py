@@ -1,163 +1,161 @@
 import os
 import tweepy
 import threading
+import time
+import requests
 from fastapi import FastAPI
 import uvicorn
-from telegram import Bot as TelegramBot
-from telegram.ext import Updater, MessageHandler, Filters
-import logging
 
-# ===========================
-# ENVIRONMENT VARIABLES
-# ===========================
+# ========================
+#   CONFIGURACIÓN TWITTER
+# ========================
+
 API_KEY = os.getenv("API_KEY")
 API_SECRET = os.getenv("API_SECRET")
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 ACCESS_TOKEN_SECRET = os.getenv("ACCESS_TOKEN_SECRET")
 BEARER_TOKEN = os.getenv("BEARER_TOKEN")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# ===========================
-# TWITTER CLIENT (API v2)
-# ===========================
-twitter_client = tweepy.Client(
+client = tweepy.Client(
     bearer_token=BEARER_TOKEN,
     consumer_key=API_KEY,
     consumer_secret=API_SECRET,
     access_token=ACCESS_TOKEN,
-    access_token_secret=ACCESS_TOKEN_SECRET,
+    access_token_secret=ACCESS_TOKEN_SECRET
 )
 
-# ===========================
-# TELEGRAM BOT
-# ===========================
-telegram_bot = TelegramBot(token=TELEGRAM_TOKEN)
+# ========================
+#   CONFIGURACIÓN TELEGRAM
+# ========================
 
-pending_tweet_id = None  # almacena el tweet esperando aprobación
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Palabras para filtrar tweets políticos relevantes
-KEYWORDS = [
-    "marx", "marxismo", "socialismo", "comunismo", "socialista", "comunista",
-    "capitalismo", "imperialismo", "clase obrera", "lucha de clases",
-    "dictadura del proletariado", "neoliberalismo", "antiimperialista",
-    "CIA", "OTAN", "economía política", "gringo", "yanqui"
+def send_telegram_message(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print("Error enviando mensaje a Telegram:", e)
+
+
+# ========================
+#     CONFIG DEL BOT
+# ========================
+
+USERS_TO_MONITOR = [
+    "IvanCepedaCast", "RedPlanetaCol", "Ruzzarin", "petrogustavo"
 ]
 
+KEYWORDS_MARX = [
+    "marx", "marxismo", "clase obrera", "socialismo", "revolución",
+    "lenin", "stalin", "mao", "plusvalía", "explotación"
+]
 
-# ===========================
-# FUNCIÓN: ENVIAR A TELEGRAM
-# ===========================
-def send_to_telegram(tweet_text, tweet_id):
-    global pending_tweet_id
-    pending_tweet_id = tweet_id
+KEYWORDS_ANTI = [
+    "comunismo malo", "dictadura comunista", "socialismo fracaso",
+    "antimarxista", "anticomunista", "izquierda terrorista"
+]
 
-    telegram_bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        text=f"¿Quieres retuitear esto?\n\n{tweet_text}\n\nResponde: SI o NO"
-    )
+# Para evitar repetir tweets.
+last_seen = {}
+
+# ========================
+#    PROCESAMIENTO TWEETS
+# ========================
+
+def classify_tweet(text):
+    t = text.lower()
+
+    if any(k in t for k in KEYWORDS_MARX):
+        return "marx"
+    if any(k in t for k in KEYWORDS_ANTI):
+        return "anti"
+    
+    return None
 
 
-# ===========================
-# TELEGRAM HANDLER
-# ===========================
-def handle_telegram(update, context):
-    global pending_tweet_id
+def bot_loop():
+    print(">>> Bot de Twitter iniciado…")
 
-    text = update.message.text.strip().lower()
-
-    if pending_tweet_id is None:
-        return
-
-    if text == "si":
+    while True:
         try:
-            twitter_client.retweet(pending_tweet_id)
-            telegram_bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text="Retweet realizado 👍"
-            )
+            for user in USERS_TO_MONITOR:
+
+                u = client.get_user(username=user)
+                if not u or not u.data:
+                    continue
+
+                tweets = client.get_users_tweets(
+                    id=u.data.id,
+                    max_results=5
+                )
+
+                if not tweets or not tweets.data:
+                    continue
+
+                for tweet in tweets.data:
+
+                    if last_seen.get(user) == tweet.id:
+                        continue
+
+                    last_seen[user] = tweet.id
+                    classification = classify_tweet(tweet.text)
+
+                    if classification is None:
+                        continue
+
+                    tweet_url = f"https://twitter.com/{user}/status/{tweet.id}"
+
+                    if classification == "marx":
+                        msg = (
+                            "📢 <b>NUEVO TWEET MARXISTA DETECTADO</b>\n"
+                            f"Autor: @{user}\n\n"
+                            f"{tweet.text}\n\n"
+                            f"<a href='{tweet_url}'>Ver Tweet</a>\n\n"
+                            "Responde con /rt para retuitearlo."
+                        )
+
+                    elif classification == "anti":
+                        msg = (
+                            "⚠️ <b>TWEET ANTICOMUNISTA DETECTADO</b>\n"
+                            f"Autor: @{user}\n\n"
+                            f"{tweet.text}\n\n"
+                            f"<a href='{tweet_url}'>Ver Tweet</a>\n\n"
+                            "Responde con /rt para desmontarlo con retweet."
+                        )
+
+                    send_telegram_message(msg)
+
+            time.sleep(60)
+
         except Exception as e:
-            telegram_bot.send_message(
-                chat_id=TELEGRAM_CHAT_ID,
-                text=f"Error al retuitear: {e}"
-            )
-
-        pending_tweet_id = None
-
-    elif text == "no":
-        telegram_bot.send_message(
-            chat_id=TELEGRAM_CHAT_ID,
-            text="Entendido, no se retuitea."
-        )
-        pending_tweet_id = None
+            print("Error en el bot:", e)
+            time.sleep(10)
 
 
-# ===========================
-# INICIAR ESCUCHA EN TELEGRAM
-# ===========================
-def start_telegram_listener():
-    updater = Updater(TELEGRAM_TOKEN, use_context=True)
-    dispatcher = updater.dispatcher
-    dispatcher.add_handler(MessageHandler(Filters.text, handle_telegram))
-    updater.start_polling()
-    updater.idle()
+# ========================
+#       SERVIDOR WEB
+# ========================
 
-
-# ===========================
-# TWITTER STREAM
-# ===========================
-class PoliticalStream(tweepy.StreamingClient):
-    def on_tweet(self, tweet):
-
-        if any(keyword in tweet.text.lower() for keyword in KEYWORDS):
-            send_to_telegram(tweet.text, tweet.id)
-
-    def on_connection_error(self):
-        self.disconnect()
-
-
-# ===========================
-# INICIAR STREAM
-# ===========================
-def start_stream():
-    stream = PoliticalStream(BEARER_TOKEN)
-
-    # Limpiar reglas anteriores
-    rules = stream.get_rules().data
-    if rules:
-        rule_ids = [rule.id for rule in rules]
-        stream.delete_rules(rule_ids)
-
-    # Regla general para recibir tweets públicos
-    stream.add_rules(tweepy.StreamRule("lang:es -is:retweet"))
-
-    stream.filter(
-        expansions=["author_id"],
-        tweet_fields=["created_at", "text", "id"]
-    )
-
-
-# ===========================
-# FASTAPI (mantener vivo en Render)
-# ===========================
 app = FastAPI()
 
 @app.get("/")
-def home():
-    return {"status": "Twitter Bot Running"}
+def root():
+    return {"status": "running", "message": "Twitter bot activo"}
 
 
-# ===========================
-# MAIN
-# ===========================
+# ========================
+#   EJECUCIÓN EN RENDER
+# ========================
+
+threading.Thread(target=bot_loop, daemon=True).start()
+
 if __name__ == "__main__":
-    # Telegram listener en hilo separado
-    threading.Thread(target=start_telegram_listener, daemon=True).start()
-
-    # Twitter stream en hilo separado
-    threading.Thread(target=start_stream, daemon=True).start()
-
-    print("Bot iniciado correctamente…")
-
-    # Mantener servidor vivo en Render
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+    port = int(os.getenv("PORT", 10000))
+    uvicorn.run("bot:app", host="0.0.0.0", port=port)
