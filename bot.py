@@ -20,80 +20,119 @@ client = tweepy.Client(
     consumer_key=API_KEY,
     consumer_secret=API_SECRET,
     access_token=ACCESS_TOKEN,
-    access_token_secret=ACCESS_TOKEN_SECRET,
-    wait_on_rate_limit=True
+    access_token_secret=ACCESS_TOKEN_SECRET
 )
 
 # ========================
-#   CONFIG DEL BOT
+#   LISTAS Y CLASIFICADOR
 # ========================
 
 USERS_TO_MONITOR = [
     "IvanCepedaCast", "RedPlanetaCol", "Ruzzarin", "petrogustavo"
 ]
 
-KEYWORDS = [
-    "comunismo", "capitalismo", "socialismo", "china",
-    "colombia", "venezuela", "cuba", "stalin", "lenin"
+MARXISTA = [
+    "marx", "lenin", "stalin", "gramsci", "proletariado",
+    "burguesía", "imperialismo", "socialismo", "materialismo",
+    "comunista", "comunismo científico"
 ]
 
-last_seen = {}
+ANTICOMUNISTA = [
+    "comunismo asesino", "castrochavismo", "dictadura socialista",
+    "socialismo fracaso", "venezuela hambre", "cuba dictadura",
+    "antisocialista", "antimarxista", "marxismo cultural"
+]
+
+GEOPOLITICA = [
+    "china", "brics", "otan", "geopolítica", "sanciones",
+    "nacionalización", "privatización", "ee.uu", "pib", "inflación"
+]
+
+def clasificar_tweet(texto):
+    t = texto.lower()
+
+    if any(p in t for p in MARXISTA):
+        return "marxista"
+    if any(p in t for p in ANTICOMUNISTA):
+        return "propaganda"
+    if any(p in t for p in GEOPOLITICA):
+        return "geopolítica"
+
+    return "otro"
+
+def mensaje_analisis(tweet, autor):
+    categoria = clasificar_tweet(tweet.text)
+
+    if categoria == "marxista":
+        analisis = "🟥 *Contenido marxista / de izquierda*"
+    elif categoria == "propaganda":
+        analisis = "🟦 *Propaganda o ataque anti-socialista*"
+    elif categoria == "geopolítica":
+        analisis = "🟩 *Contenido geopolítico relevante*"
+    else:
+        analisis = "⚪ *Política general*"
+
+    enlace = f"https://twitter.com/{autor}/status/{tweet.id}"
+
+    return f"{analisis}\n\n📝 {tweet.text}\n\n🔗 {enlace}"
+
+# =================================================
+#   DEBES DEFINIR ESTA FUNCIÓN CON TU TOKEN TELEGRAM
+# =================================================
+def enviar_a_telegram(mensaje):
+    import requests
+    TOKEN = os.getenv("TELEGRAM_TOKEN")
+    CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+    if not TOKEN or not CHAT_ID:
+        print("Telegram no configurado.")
+        return
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    data = {"chat_id": CHAT_ID, "text": mensaje}
+    requests.post(url, data=data)
+
 
 # ========================
-#       BOT LOOP SEGURO
+#       BOT LOOP
 # ========================
 
 def bot_loop():
-    print(">>> Bot estable iniciado…")
+    print(">>> Bot de Twitter iniciado…")
+    last_seen = {}
 
     while True:
         try:
             for user in USERS_TO_MONITOR:
 
-                try:
-                    u = client.get_user(username=user)
-                    if not u or not u.data:
-                        continue
-                except:
+                u = client.get_user(username=user)
+                if not u or not u.data:
                     continue
 
-                try:
-                    tweets = client.get_users_tweets(
-                        id=u.data.id,
-                        max_results=5
-                    )
-                except:
-                    continue
-
+                tweets = client.get_users_tweets(id=u.data.id, max_results=5)
                 if not tweets or not tweets.data:
                     continue
 
                 for tweet in tweets.data:
 
-                    # evitar duplicados
                     if last_seen.get(user) == tweet.id:
                         continue
 
                     last_seen[user] = tweet.id
+                    texto = tweet.text.lower()
 
-                    text = tweet.text.lower()
+                    if clasificar_tweet(texto) != "otro":
+                        mensaje = mensaje_analisis(tweet, user)
+                        enviar_a_telegram(mensaje)
+                        print(f"Enviado a Telegram desde @{user}")
 
-                    # verificar keywords
-                    if any(k in text for k in KEYWORDS):
-                        try:
-                            client.retweet(tweet.id)
-                            print(f"RT a @{user}: {tweet.id}")
-                        except:
-                            pass
+            time.sleep(60)
 
-            time.sleep(90)  # más seguro, evita 429
+        except Exception as e:
+            print("Error en el bot:", e)
+            time.sleep(10)
 
-        except Exception:
-            time.sleep(5)
-            continue
 
-# Hilo seguro
 threading.Thread(target=bot_loop, daemon=True).start()
+
 
 # ========================
 #       SERVIDOR WEB
@@ -103,7 +142,7 @@ app = FastAPI()
 
 @app.get("/")
 def root():
-    return {"status": "running", "message": "Bot retweeter activo"}
+    return {"status": "running", "message": "Twitter bot activo"}
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 10000))
