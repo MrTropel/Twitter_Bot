@@ -1,117 +1,113 @@
-import tweepy
-from fastapi import FastAPI
-import threading
 import os
+import tweepy
+import threading
+from fastapi import FastAPI
+import uvicorn
+import time
 
-# --- TWITTER BOT LÓGICA ----
+# ========================
+#   CONFIGURACIÓN TWITTER
+# ========================
 
-def run_bot():
-    # Aquí va tu código del bot
-    print("Bot iniciado...")
-    # Ejemplo:
+API_KEY = os.getenv("TWITTER_API_KEY")
+API_SECRET = os.getenv("TWITTER_API_SECRET")
+ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN")
+ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET")
+BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN")
+
+# Autenticación de Twitter
+client = tweepy.Client(
+    bearer_token=BEARER_TOKEN,
+    consumer_key=API_KEY,
+    consumer_secret=API_SECRET,
+    access_token=ACCESS_TOKEN,
+    access_token_secret=ACCESS_SECRET
+)
+
+# ========================
+#     LISTAS DEL BOT
+# ========================
+
+USERS_TO_MONITOR = [
+    "IvanCepedaCast", "RedPlanetaCol", "Ruzzarin", "petrogustavo"
+    # agrega los demás aquí
+]
+
+KEYWORDS = [
+    "comunismo", "capitalismo", "socialismo", "china",
+    "colombia", "venezuela", "cuba", "stalin", "lenin"
+]
+
+RESPUESTAS = [
+    "Reducir todo a propaganda barata es ignorar la historia material.",
+    "Los trabajadores producen el valor; el capital solo lo captura.",
+    "El anticomunismo siempre termina justificando autoritarismos.",
+    "La soberanía de un pueblo incomoda al imperialismo, por eso lo atacan."
+]
+
+# ========================
+#   LÓGICA PRINCIPAL BOT
+# ========================
+
+def bot_loop():
+    print(">>> Bot de Twitter iniciado…")
+
+    last_seen = {}
+
     while True:
-        pass  # tu lógica aquí (streams, búsquedas, respuestas, etc.)
+        try:
+            for user in USERS_TO_MONITOR:
+                tweets = client.get_users_tweets(
+                    id=client.get_user(username=user).data.id,
+                    max_results=5
+                )
 
-# --- SERVIDOR FASTAPI ---
+                if not tweets or not tweets.data:
+                    continue
+
+                for tweet in tweets.data:
+                    # evitar duplicados
+                    if last_seen.get(user) == tweet.id:
+                        continue
+
+                    last_seen[user] = tweet.id
+
+                    text = tweet.text.lower()
+
+                    # buscar keywords
+                    if any(k in text for k in KEYWORDS):
+                        respuesta = RESPUESTAS[len(text) % len(RESPUESTAS)]
+
+                        print(f"Respondiendo a @{user}: {respuesta}")
+
+                        client.create_tweet(
+                            text=respuesta,
+                            in_reply_to_tweet_id=tweet.id
+                        )
+
+            time.sleep(60)  # evita límites de API
+
+        except Exception as e:
+            print("Error en el bot:", e)
+            time.sleep(10)
+
+# hilo paralelo donde corre el bot
+threading.Thread(target=bot_loop, daemon=True).start()
+
+# ========================
+#       SERVIDOR WEB
+# ========================
 
 app = FastAPI()
 
 @app.get("/")
-def home():
-    return {"status": "Bot running"}
+def root():
+    return {"status": "running", "message": "Twitter bot activo"}
 
-# --- INICIO DEL BOT EN HILO SEPARADO ---
+# ========================
+#   EJECUCIÓN EN RENDER
+# ========================
 
-threading.Thread(target=run_bot, daemon=True).start()
-
-# ----------------------
-#   CONFIGURACIÓN
-# ----------------------
-
-API_KEY = "TU_API_KEY"
-API_SECRET = "TU_API_SECRET"
-ACCESS_TOKEN = "TU_ACCESS_TOKEN"
-ACCESS_SECRET = "TU_ACCESS_SECRET"
-
-TELEGRAM_TOKEN = "TU_TELEGRAM_BOT_TOKEN"
-TELEGRAM_CHAT_ID = "TU_CHAT_ID"
-
-CUENTAS = [
-    "Iván Cepeda Castro", "Partido Comunista Revolucionario", "Madeline Pendleton",
-    "Rafael Solano", "ʟᴀɪᴋᴀ ☭", "LadyIzdihar", "Red Planeta", "★☭MassStrikeNow☭★",
-    "Embajada de China en Colombia", "Diego Ruzzarin ☭", "Capitaine Ibrahim TRAORÉ",
-    "Ma Wukong 马悟空", "antolin pulido", "Fibrik", "Feker", "BRICS News",
-    "Spetsnaℤ 007", "Colombia Oscura", "David Rozo", "Guerra universitaria",
-    "Prensa Libre", "Gustavo Petro", "Puma Chairo", "Pamphlets",
-    "inhumans of capitalism (Ojibwa )☭", "Jackson Hinkle", "BlackRedGuard ☭",
-    "Santiago Armesilla", "María Fernanda Cabal", "Memes Universidad Nacional",
-    "Mateo Amaya Quimbayo"
-]
-
-KEYWORDS = [
-    "comunismo", "capitalismo", "socialismo", "anarquia", "china", "colombia",
-    "estados unidos", "venezuela", "cuba", "korea del norte", "ussr", "union sovietica",
-    "revolucion", "stalin", "lenin", "uribe", "petro"
-]
-
-
-def generar_respuesta(texto):
-    # Estilo "Mr. Tropel"
-    respuestas = [
-        "Reducir esto a consignas vacías es repetir propaganda vieja. Analiza el poder material detrás, no el cuento fácil.",
-        "Los anticomunistas siempre terminan abrazando el fascismo cuando el capitalismo entra en crisis.",
-        "El problema no es la ideología: es quién controla los medios de vida. Sin eso, no hay libertad real.",
-        "La plusvalía no desaparece porque la ignores: la economía funciona por explotación, no por magia.",
-        "Cuando te quedas sin argumentos recurres al insulto. Eso ya es una derrota política."
-    ]
-    return respuestas[hash(texto) % len(respuestas)]
-
-
-def send_telegram(msg):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
-
-
-# ----------------------
-#   AUTENTICACIÓN
-# ----------------------
-
-auth = tweepy.OAuth1UserHandler(API_KEY, API_SECRET, ACCESS_TOKEN, ACCESS_SECRET)
-api = tweepy.API(auth)
-
-print("Bot iniciado...")
-
-# ----------------------
-#   LOOP PRINCIPAL
-# ----------------------
-
-LAST_SEEN = None
-
-while True:
-    try:
-        timeline = api.home_timeline(count=50, tweet_mode="extended")
-
-        for t in timeline:
-            texto = t.full_text.lower()
-
-            if LAST_SEEN and t.id <= LAST_SEEN:
-                continue
-
-            if any(c.lower() in t.user.name.lower() for c in CUENTAS) or any(k in texto for k in KEYWORDS):
-                respuesta = generar_respuesta(texto)
-
-                api.update_status(
-                    status=f"@{t.user.screen_name} {respuesta}",
-                    in_reply_to_status_id=t.id
-                )
-
-                send_telegram(f"Respondí a @{t.user.screen_name}:\n\n{respuesta}")
-
-        if timeline:
-            LAST_SEEN = timeline[0].id
-
-    except Exception as e:
-        send_telegram(f"Error: {e}")
-
-
-    time.sleep(30)
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 10000))
+    uvicorn.run("bot:app", host="0.0.0.0", port=port)
