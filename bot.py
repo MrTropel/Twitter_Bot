@@ -1,6 +1,28 @@
 import tweepy
-import time
-import requests
+from fastapi import FastAPI
+import threading
+import os
+
+# --- TWITTER BOT LÓGICA ----
+
+def run_bot():
+    # Aquí va tu código del bot
+    print("Bot iniciado...")
+    # Ejemplo:
+    while True:
+        pass  # tu lógica aquí (streams, búsquedas, respuestas, etc.)
+
+# --- SERVIDOR FASTAPI ---
+
+app = FastAPI()
+
+@app.get("/")
+def home():
+    return {"status": "Bot running"}
+
+# --- INICIO DEL BOT EN HILO SEPARADO ---
+
+threading.Thread(target=run_bot, daemon=True).start()
 
 # ----------------------
 #   CONFIGURACIÓN
@@ -90,5 +112,6 @@ while True:
 
     except Exception as e:
         send_telegram(f"Error: {e}")
+
 
     time.sleep(30)
