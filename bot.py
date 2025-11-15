@@ -79,12 +79,18 @@ def bot_loop():
 
             time.sleep(600)
 
-        except Exception as e:
+        except Exception:
             time.sleep(600)
 
-threading.Thread(target=bot_loop, daemon=True).start()
+# ============================
+#   FIX: INICIAR BOT EN RENDER
+# ============================
 
 app = FastAPI()
+
+@app.on_event("startup")
+def start_background_tasks():
+    threading.Thread(target=bot_loop, daemon=True).start()
 
 @app.get("/")
 def root():
